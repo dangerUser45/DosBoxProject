@@ -3,18 +3,27 @@
 .code                               ;                            (например, как эта рамка)                             ;
 org 100h                            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-Start: 
-    mov ax, 40  ; x                                          
-    mov bl, 20  ; y
 
-    call MY_STRLEN
-    call GET_BIAS
-    call GET_EVEN
+Start: jmp MAIN
+;---------------------------------------------------------
+MESSAGE: db "Hello world!$"
 
-    call DRAW_FRAMES
-    call PRINT_MESSAGE
+COLOR: dw 0111010000000000b
 
-    call MY__END
+SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
+;---------------------------------------------------------
+    MAIN:
+            mov ax, 40  ; x                                          
+            mov bl, 20   ; y
+
+            call GET_BIAS
+            call GET_EVEN
+
+            call DRAW_FRAMES
+            call MY_STRLEN
+            call PRINT_MESSAGE
+
+            call MY__END
 ;---------------------------------------------------------
     MY_STRLEN proc
 
@@ -76,7 +85,7 @@ Start:
 ; DESTROY: SI
 
         and si, 0fffeh
-        db " $"
+        ret  
    endp
 ;---------------------------------------------------------
     DRAW_FRAMES proc
@@ -89,10 +98,10 @@ Start:
 ;EXIT   : None
 ;DESTROY: BH
             xor bh, bh 
-            ;mov si, 1368
             mov cx, 0b800h
             mov es, cx
-            mov dh, 01110100b
+            mov di, [offset COLOR]
+            mov dx, [di]
             xor di, di
             sub bl, 2
             call DRAW_LINES
@@ -122,15 +131,15 @@ Start:
 ;          DH - color of frame
 ;          DL - current symbol
 ;          DI - counter of current symbol
+;          SI - current bias of begining video memory
 ; EXIT   : None
 ; DESTROY: SI
 
-    FILL_VDO_MEM macro
+    FILL_VIDEO_MEMORY macro
             mov dl, [offset SYMBOLS + di]
             mov es: [si], dx
     endm
-            push si
-            FILL_VDO_MEM
+            FILL_VIDEO_MEMORY
             inc di
             sub ax, 2
             xor cx, cx
@@ -142,13 +151,16 @@ Start:
             add ax, 2
             add si, 2
             inc di
-            FILL_VDO_MEM
-            pop si
+            FILL_VIDEO_MEMORY
+            shl ax,  1
+            sub si, ax
+            add si, 2
+            shr ax, 1
             ret 
 
     BELOW:
             add si, 2
-            FILL_VDO_MEM
+            FILL_VIDEO_MEMORY
             inc cx
             jmp CONDITION_DRAW
 
@@ -169,8 +181,9 @@ Start:
 ;
 ;
 ;
-            sub ax, 800   ; bias_common = bias_x = bias_y = (25 - y=1)/2 * 160 + (160 - 2x)/2 = 800 - x
-            neg ax
+            mov si, cx
+            sub si, 2000   ; bias_common = bias_x + bias_y = (25 - 1)/2 * 160 + (160 - 2x)/2 = 2000 - x
+            neg si
             ret
     endp
 ;--------------------------------------------------------
@@ -179,21 +192,25 @@ Start:
 ; ENTRY  : SI - bias
 ;          DH - color of text
 ; DESTROY: 
+            mov di, [offset COLOR]
+            mov dx, [di]
             mov bx, 0b800h
             mov es, bx
-            mov bx,  [offset MESSAGE]
+            mov bx, offset MESSAGE
             xor ax, ax
+
+    BELOW_PRINT:
+            mov di, [bx]
+            mov es: [si], di
+            mov es: [si+1], dh
+            inc bx
+            inc ax
+            add si, 2
 
     CONDITION_PRINT:
             cmp ax, cx
             jb BELOW_PRINT
             ret
-
-    BELOW_PRINT:
-            mov  es: [si], bx
-            mov  es: [si+1], dh
-            inc bx
-            inc ax
     endp
 ;---------------------------------------------------------
     MY__END proc
@@ -202,9 +219,5 @@ Start:
             ret
     endp
 ;---------------------------------------------------------
-MESSAGE: db "I love you$"
-
-SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
-
 end     Start
 ;---------------------------------------------------------
