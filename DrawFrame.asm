@@ -1,20 +1,39 @@
+.model tiny                         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+.code                               ;                         Программа вывода цветной рамочки                         ;
+org 100h                            ;                            (например, как эта рамка)                             ;
                                     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-.model tiny                         ;                         Программа вывода цветной рамочки                         ;
-.code                               ;                            (например, как эта рамка)                             ;
-org 100h                            ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
 Start: jmp MAIN
 ;---------------------------------------------------------
-MESSAGE: db "Hello world!$"
-
-COLOR: dw 0111010000000000b
+MESSAGE: db "wqds$"
 
 SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
+
+STYLES: 
+        db 0c9h, 03h,  0bbh
+        db 03h,  0h,   03h
+        db 0c8h, 03h,  0bch
+
+        db 0dah, 0c2h, 0bfh
+        db 0c3h, 0h,   0b4h
+        db 0c0h, 0c1h, 0d9h
+
+        db 0c9h, 0cbh, 0bbh
+        db 0cch, 0h,   0b9h
+        db 0c8h, 0cah, 0bch
+
+        db 0d6h, 0d2h, 0b7h
+        db 0c7h, 0h,   0b6h
+        db 0d3h, 0d0h, 0bdh
+
+        db 0d5h, 0d1h, 0b8h
+        db 0c6h, 0h,   0b5h
+        db 0d4h, 0cfh, 0beh
 ;---------------------------------------------------------
     MAIN:
-            mov ax, 40  ; x                                          
-            mov bl, 20   ; y
+            call GET_X_Y
+            mov dx, ax
+            call GET_COLOR
+            mov ax, dx
 
             call GET_BIAS
             call GET_EVEN
@@ -25,33 +44,158 @@ SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
 
             call MY__END
 ;---------------------------------------------------------
-    MY_STRLEN proc
+    GET_X_Y proc
+; 
+; ENTRY:   None
+; EXIT:    AX - frame width  (X)
+;          BX - frame height (Y)
+; DESTROY: AX, BX, CX, DX, SI, DI
 
-; MY_STRLEN counts the number of characters in the string until it reaches the '$' character
-; ENTRY: None
-; EXIT:  CX - result
-; DESTR: SI, DX, CX
+            mov si, 082h
+            call MY_ATOI
+            mov cx, bx
 
-            mov si, offset MESSAGE
             mov di, si
-            mov cl, '$'
+            call SKIP_SPACE
 
-    CONDITION_STRLEN:
-                                ;move si offset si
-            cmp [si], cl        ;scasb ds:[si] c al b si++
-            jne NOT_EQUAL       ;repne scasb -  repeat while not equal
-            jmp EQUAL           ;sub
-                                ;xor cx cx 
-                                ;dec cx 
-                                                   
-    NOT_EQUAL:
-            inc si
-            jmp CONDITION_STRLEN
-    EQUAL:                                       
-            sub si, di
-            mov cx, si
+            mov si, di
+            call MY_ATOI
+
+            mov di, si
+            call SKIP_SPACE
+            
+            mov ax, cx
             ret
     endp
+;---------------------------------------------------------
+    GET_COLOR proc
+;
+;
+;
+           mov si, di
+           call MY_ATOHEX
+
+           mov di, si
+           call SKIP_SPACE
+           ret
+    endp
+;---------------------------------------------------------
+
+        MY_ATOI proc
+; Converts a number consisting of ascii codes into a hex number
+; ENTRY:   None
+; EXIT:    BX - result
+; DESTROY: AX, BX, DX, SI 
+
+           mov ax, [si]         ;\
+           cmp al, 0h           ;| - если по адресу ds:si = 0 (нет аргументов командной строки) => завершаем программу
+           je OUT__             ;/
+
+           xor ax, ax
+           xor bx, bx
+           lodsb
+           
+        CONDITION_ATOI:
+           cmp al, '9'
+           ja NOT_NUMBER
+
+           cmp al, '0'
+           jb NOT_NUMBER
+
+           sub al, '0'
+           mov dx, bx   ;\
+           shl bx, 3    ;|  <=> bx = bx * 10   
+           shl dx, 1    ;|
+           add bx, dx   ;/
+           add bx, ax
+           lodsb
+           jmp CONDITION_ATOI
+
+        NOT_NUMBER:
+           ret
+
+        OUT__: call MY__END
+   endp
+;---------------------------------------------------------
+        SKIP_SPACE proc
+
+; Skips whitespace characters until it reaches the first non-whitespace character. 
+; ENTRY:   AL - current symbol in string
+;          DI - address of current symbol
+; EXIT:    DI - address of the first non-space character encountered
+; DESTROY: AL, SI, DI
+
+           mov si, ds
+           mov es, si
+           mov al, byte ptr es:[di] 
+           cmp al, ' '
+           jne OUT_SKIP_SPACE
+
+           mov al, ' '
+           repe scasb
+           dec di
+
+        OUT_SKIP_SPACE: 
+           ret
+    endp
+;---------------------------------------------------------
+        MY_ATOHEX proc
+
+; Converts a number consisting of ascii codes into a hex number
+; ENTRY:   None
+; EXIT:    CX - result
+; DESTROY: AX, CX, DX, SI 
+
+           mov ax, [si]         ;\
+           cmp al, 0h           ;| - если по адресу ds:si = 0 (нет аргументов командной строки) => завершаем программу
+           je OUT__             ;/
+
+           xor ax, ax
+           xor cx, cx
+           lodsb
+           
+        CONDITION_ATOHEX:
+           cmp al, '0'
+           jb MY_NOT_NUMBER
+
+           cmp al, '9'
+           ja CompareBigLetters
+           
+           sub al, '0'
+           jmp ConvertingToHex
+        
+        CompareBigLetters:
+           cmp al, 'A'
+           jb MY_NOT_NUMBER
+
+           cmp al, 'F'
+           ja CompareSmallLetters
+           
+           sub al, 'A'
+           add al, 10
+           jmp ConvertingToHex
+
+        CompareSmallLetters:
+           cmp al, 'a'
+           jb MY_NOT_NUMBER
+
+           cmp al, 'f'
+           ja MY_NOT_NUMBER
+           
+           sub al, 'a'
+           add al, 10
+
+        ConvertingToHex:
+           shl cx, 4
+           add cx, ax
+           lodsb
+           jmp CONDITION_ATOHEX
+
+        MY_NOT_NUMBER:
+           ret
+
+        MY_OUT__: call MY__END
+   endp
 ;---------------------------------------------------------
     GET_BIAS proc
 
@@ -75,7 +219,6 @@ SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
             shl si, 1
             add si, di
             ret
-            
     endp
 ;---------------------------------------------------------
     GET_EVEN proc
@@ -85,7 +228,7 @@ SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
 ; DESTROY: SI
 
         and si, 0fffeh
-        ret  
+        ret
    endp
 ;---------------------------------------------------------
     DRAW_FRAMES proc
@@ -97,22 +240,23 @@ SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
 ;         SI - current line start address
 ;EXIT   : None
 ;DESTROY: BH
-            xor bh, bh 
-            mov cx, 0b800h
-            mov es, cx
-            mov di, [offset COLOR]
-            mov dx, [di]
+
+            mov dx, 0b800h  ;!!! change cx - dx
+            mov es, dx      ;!!! change cx - dx
+            mov dx, cx      ;|- Set Color
+            push cx
             xor di, di
             sub bl, 2
             call DRAW_LINES
             add si, 160
             inc di
 
-    CONDITION_FRAMES:
+        CONDITION_FRAMES:
             cmp bh, bl
             jb BELOW_FRAMES
             add di, 3
             call DRAW_LINES
+            pop dx
             ret
 
     BELOW_FRAMES:
@@ -166,6 +310,25 @@ SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
 
     endp
 ;---------------------------------------------------------
+    MY_STRLEN proc
+
+; MY_STRLEN counts the number of characters in the string until it reaches the '$' character
+; ENTRY: None
+; EXIT:  CX - result
+; DESTR: AL, DI, CX
+
+            mov al, '$'
+            mov di, ds
+            mov es, di
+            lea di, MESSAGE
+            xor cx, cx
+            dec cx
+            repne scasb
+            neg cx
+            sub cx, 2
+            ret
+    endp
+;---------------------------------------------------------
     PRINT_MESSAGE proc
 ; Print message in center of frame
 ; ENTRY  : 
@@ -190,10 +353,8 @@ SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
     PRINT proc
 ; Function for printing text at a calculated address
 ; ENTRY  : SI - bias
-;          DH - color of text
+;          DX - color of text
 ; DESTROY: 
-            mov di, [offset COLOR]
-            mov dx, [di]
             mov bx, 0b800h
             mov es, bx
             mov bx, offset MESSAGE
@@ -214,6 +375,8 @@ SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
     endp
 ;---------------------------------------------------------
     MY__END proc
+
+    MY_END_Label:
             mov ah, 4ch
             int 21h
             ret
