@@ -31,16 +31,23 @@ STYLES:
 ;---------------------------------------------------------
     MAIN:
             call GET_X_Y
-            mov dx, ax
             call GET_COLOR
-            mov ax, dx
+            push di
 
             call GET_BIAS
             call GET_EVEN
+            pop di
 
+            mov dx, bx              ;\
+            mov bx, cx              ;| <=> mov ah, cl
+            mov ah, bl              ;|
+            mov bx, dx              ;/
+            call GET_STYLE_FRAME
+
+            call CTOR_DRAW_FRAMES
             call DRAW_FRAMES
-            call MY_STRLEN
-            call PRINT_MESSAGE
+            ;call MY_STRLEN
+            ;call PRINT_MESSAGE
 
             call MY__END
 ;---------------------------------------------------------
@@ -71,16 +78,17 @@ STYLES:
     GET_COLOR proc
 ;
 ;
-;
+;           
+           mov dx, ax       ;| - сохранить значение ax в dx (ненужный регистр)
            mov si, di
            call MY_ATOHEX
 
            mov di, si
            call SKIP_SPACE
+           mov ax, dx       ;| - вернуть прошлое значение ax
            ret
     endp
 ;---------------------------------------------------------
-
         MY_ATOI proc
 ; Converts a number consisting of ascii codes into a hex number
 ; ENTRY:   None
@@ -231,85 +239,113 @@ STYLES:
         ret
    endp
 ;---------------------------------------------------------
+    GET_STYLE_FRAME proc
+;
+; ENTRY:   DI - ASCII symbol of style frame
+; EXIT:    BH - hex digit frame style
+; DESTROY: BH
+
+           mov bh, byte ptr ds:[di]
+           sub bh, '0'
+           inc di
+           push ax
+           push si
+           call SKIP_SPACE
+           pop si
+           pop ax
+           ret
+    endp
+;---------------------------------------------------------
+    CTOR_DRAW_FRAMES proc
+;
+;
+;
+;          
+           mov cx, ax       ;\
+           and cx, 0ffh     ;| <=> mov ah, cl &&  подготовка регистра cx как счётчика для DRAW_LINE
+           sub cx, 2        ;/
+
+           push di          ;\
+           and ax, 0ff00h   ;| - сохранение значений
+           push ax          ;/
+
+           mov dx, 0b800h   ;\
+           mov es, dx       ;/ <=> es = 0b800h + si (bias)
+
+           mov di, si
+           xor ax, ax
+
+           mov al, bh       ;\
+           cmp al, 0h       ;| - сравниваем стиль рамки с "0". Если да => переход по метке 
+           je ADD_STYLE     ;/
+           
+           dec ax           ;|
+           mov dx, ax       ;| 
+           shl ax, 3        ;|
+           add ax, dx       ;| <=> mov si, offset STYLES + (bh - 1)*9
+           lea dx, STYLES   ;|
+           add ax, dx       ;|
+           mov si, ax       ;/
+
+           xor dx, dx       ;\
+           mov dl, bl       ;| - подготовка регистра dx как счётчика для DRAW_FRAME_CYCLE
+           sub dx, 2        ;/
+           ret
+    endp
+;---------------------------------------------------------
     DRAW_FRAMES proc
+;
+;
+;
+;
+           pop ax
+           push cx 
+           push di          ;\
+           call DRAW_LINE   ;|
+           pop di           ;| - print first line
+           pop cx           ;|
+           add di, 160      ;/
+        
+        DRAW_FRAME_CYCLE:
+           push cx
+           push di
+           call DRAW_LINE
+           pop di
+           add di, 160
+           pop cx
+           sub si, 3
+           dec dx
+           cmp dx, 0h
+           jne DRAW_FRAME_CYCLE
 
-; ENTRY:  AX - x
-;         BL - y
-;         DI - current location in symbols array
-;         CX - counter of cycle
-;         SI - current line start address
-;EXIT   : None
-;DESTROY: BH
+           add si, 3
+           call DRAW_LINE  ;| - print last line
 
-            mov dx, 0b800h  ;!!! change cx - dx
-            mov es, dx      ;!!! change cx - dx
-            mov dx, cx      ;|- Set Color
-            push cx
-            xor di, di
-            sub bl, 2
-            call DRAW_LINES
-            add si, 160
-            inc di
-
-        CONDITION_FRAMES:
-            cmp bh, bl
-            jb BELOW_FRAMES
-            add di, 3
-            call DRAW_LINES
-            pop dx
-            ret
-
-    BELOW_FRAMES:
-            call DRAW_LINES
-            sub di, 2
-            inc bh
-            add si, 160
-            jmp CONDITION_FRAMES
+           pop di
+           ret
     endp
 ;---------------------------------------------------------
-    DRAW_LINES proc
+    DRAW_LINE proc
+;
+;
+;
+           lodsb            ;| <=> mov al, ds:[si]  ;\ - print first symbol
+           stosw                                    ;/
 
-; Draws one line to video memory
-; ENTRY  : AX - length
-;          BL - width
-;          DH - color of frame
-;          DL - current symbol
-;          DI - counter of current symbol
-;          SI - current bias of begining video memory
-; EXIT   : None
-; DESTROY: SI
+        DRAW_LINE_CYCLE:
+           lodsb            ;| <=>  mov es[di], ax   add di, 2
+           stosw
+           dec si
+           loop DRAW_LINE_CYCLE
 
-    FILL_VIDEO_MEMORY macro
-            mov dl, [offset SYMBOLS + di]
-            mov es: [si], dx
-    endm
-            FILL_VIDEO_MEMORY
-            inc di
-            sub ax, 2
-            xor cx, cx
+           inc si
+           lodsb            ;\ - print last symbol
+           stosw            ;/
 
-    CONDITION_DRAW:
-            cmp cx, ax
-            jb BELOW
-
-            add ax, 2
-            add si, 2
-            inc di
-            FILL_VIDEO_MEMORY
-            shl ax,  1
-            sub si, ax
-            add si, 2
-            shr ax, 1
-            ret 
-
-    BELOW:
-            add si, 2
-            FILL_VIDEO_MEMORY
-            inc cx
-            jmp CONDITION_DRAW
-
+           ret
     endp
 ;---------------------------------------------------------
+
     MY_STRLEN proc
 
 ; MY_STRLEN counts the number of characters in the string until it reaches the '$' character
