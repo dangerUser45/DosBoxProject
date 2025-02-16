@@ -44,8 +44,10 @@ STYLES:
             mov bx, dx              ;/
             call GET_STYLE_FRAME
 
+            push di
             call CTOR_DRAW_FRAMES
             call DRAW_FRAMES
+            pop di
             ;call MY_STRLEN
             ;call PRINT_MESSAGE
 
@@ -265,14 +267,13 @@ STYLES:
            and cx, 0ffh     ;| <=> mov ah, cl &&  подготовка регистра cx как счётчика для DRAW_LINE
            sub cx, 2        ;/
 
-           push di          ;\
            and ax, 0ff00h   ;| - сохранение значений
            push ax          ;/
 
            mov dx, 0b800h   ;\
            mov es, dx       ;/ <=> es = 0b800h + si (bias)
-
            mov di, si
+
            xor ax, ax
 
            mov al, bh       ;\
@@ -287,9 +288,15 @@ STYLES:
            add ax, dx       ;|
            mov si, ax       ;/
 
+           pop ax
+
            xor dx, dx       ;\
            mov dl, bl       ;| - подготовка регистра dx как счётчика для DRAW_FRAME_CYCLE
            sub dx, 2        ;/
+           ret
+
+           ADD_STYLE: 
+           call ADD_FRAME_STYLE
            ret
     endp
 ;---------------------------------------------------------
@@ -298,12 +305,11 @@ STYLES:
 ;
 ;
 ;
-           pop ax
-           push cx 
            push di          ;\
-           call DRAW_LINE   ;|
-           pop di           ;| - print first line
+           push cx          ;|
+           call DRAW_LINE   ;| - print first line
            pop cx           ;|
+           pop di           ;|
            add di, 160      ;/
         
         DRAW_FRAME_CYCLE:
@@ -321,7 +327,6 @@ STYLES:
            add si, 3
            call DRAW_LINE  ;| - print last line
 
-           pop di
            ret
     endp
 ;---------------------------------------------------------
@@ -345,7 +350,14 @@ STYLES:
            ret
     endp
 ;---------------------------------------------------------
-
+    ADD_FRAME_STYLE proc
+;
+;
+;
+;
+           ret
+    endp
+;---------------------------------------------------------
     MY_STRLEN proc
 
 ; MY_STRLEN counts the number of characters in the string until it reaches the '$' character
