@@ -48,8 +48,13 @@ STYLES:
             call CTOR_DRAW_FRAMES
             call DRAW_FRAMES
             pop di
-            ;call MY_STRLEN
-            ;call PRINT_MESSAGE
+
+            call CHECK_NEW_STYLE
+
+            dec cx                  ;| - чтобы CX стал равным ffffh и repe scasb в ф-ции SKIP_SPACE работал корректно
+            call SKIP_SPACE
+            call MY_STRLEN
+            call PRINT_MESSAGE
 
             call MY__END
 ;---------------------------------------------------------
@@ -78,9 +83,7 @@ STYLES:
     endp
 ;---------------------------------------------------------
     GET_COLOR proc
-;
-;
-;           
+
            mov dx, ax       ;| - сохранить значение ax в dx (ненужный регистр)
            mov si, di
            call MY_ATOHEX
@@ -141,7 +144,6 @@ STYLES:
            cmp al, ' '
            jne OUT_SKIP_SPACE
 
-           mov al, ' '
            repe scasb
            dec di
 
@@ -232,10 +234,6 @@ STYLES:
     endp
 ;---------------------------------------------------------
     GET_EVEN proc
-; Rounding function to an even number
-; ENTRY  : AX
-; EXIT   : SI - result 
-; DESTROY: SI
 
         and si, 0fffeh
         ret
@@ -259,10 +257,7 @@ STYLES:
     endp
 ;---------------------------------------------------------
     CTOR_DRAW_FRAMES proc
-;
-;
-;
-;          
+    
            mov cx, ax       ;\
            and cx, 0ffh     ;| <=> mov ah, cl &&  подготовка регистра cx как счётчика для DRAW_LINE
            sub cx, 2        ;/
@@ -280,31 +275,23 @@ STYLES:
            cmp al, 0h       ;| - сравниваем стиль рамки с "0". Если да => переход по метке 
            je ADD_STYLE     ;/
            
-           dec ax           ;|
-           mov dx, ax       ;| 
-           shl ax, 3        ;|
-           add ax, dx       ;| <=> mov si, offset STYLES + (bh - 1)*9
-           lea dx, STYLES   ;|
-           add ax, dx       ;|
-           mov si, ax       ;/
+           call CALCULATE_BIAS_STYLE
+           jmp NEXT
 
+        ADD_STYLE: 
+           call ADD_FRAME_STYLE
+        
+        NEXT:
            pop ax
 
            xor dx, dx       ;\
            mov dl, bl       ;| - подготовка регистра dx как счётчика для DRAW_FRAME_CYCLE
            sub dx, 2        ;/
            ret
-
-           ADD_STYLE: 
-           call ADD_FRAME_STYLE
-           ret
     endp
 ;---------------------------------------------------------
     DRAW_FRAMES proc
-;
-;
-;
-;
+
            push di          ;\
            push cx          ;|
            call DRAW_LINE   ;| - print first line
@@ -324,16 +311,14 @@ STYLES:
            cmp dx, 0h
            jne DRAW_FRAME_CYCLE
 
-           add si, 3
-           call DRAW_LINE  ;| - print last line
+           add si, 3       ;\ - print last line
+           call DRAW_LINE  ;/
 
            ret
     endp
 ;---------------------------------------------------------
     DRAW_LINE proc
-;
-;
-;
+
            lodsb            ;| <=> mov al, ds:[si]  ;\ - print first symbol
            stosw                                    ;/
 
@@ -350,14 +335,40 @@ STYLES:
            ret
     endp
 ;---------------------------------------------------------
-    ADD_FRAME_STYLE proc
-;
-;
-;
-;
+    CALCULATE_BIAS_STYLE proc
+
+           dec ax           ;\
+           mov dx, ax       ;| 
+           shl ax, 3        ;|
+           add ax, dx       ;| <=> mov si, offset STYLES + (bh - 1)*9
+           lea dx, STYLES   ;|
+           add ax, dx       ;|
+           mov si, ax       ;/
+           
            ret
     endp
 ;---------------------------------------------------------
+    ADD_FRAME_STYLE proc
+
+           push bp
+           mov bp, sp
+           mov si, [bp + 8] ;| - кладём в di адрес последнего прочитанного символа из командной строки 
+           pop bp
+           ret
+    endp
+;---------------------------------------------------------
+    CHECK_NEW_STYLE proc
+
+           cmp bh, 0h
+           jne RET_CHECK
+
+           mov di, si
+            
+        RET_CHECK:
+            ret
+    endp
+;---------------------------------------------------------
+
     MY_STRLEN proc
 
 ; MY_STRLEN counts the number of characters in the string until it reaches the '$' character
@@ -365,13 +376,14 @@ STYLES:
 ; EXIT:  CX - result
 ; DESTR: AL, DI, CX
 
-            mov al, '$'
-            mov di, ds
-            mov es, di
-            lea di, MESSAGE
+            mov al, 0dh     ;| ASCII код возврата каретки
+            mov bx, ds
+            mov es, bx
             xor cx, cx
             dec cx
+            mov dx, di
             repne scasb
+            mov di, dx
             neg cx
             sub cx, 2
             ret
@@ -389,9 +401,7 @@ STYLES:
     endp
 ;---------------------------------------------------------
     GET_BIAS_MESSAGE proc
-;
-;
-;
+
             mov si, cx
             sub si, 2000   ; bias_common = bias_x + bias_y = (25 - 1)/2 * 160 + (160 - 2x)/2 = 2000 - x
             neg si
@@ -400,26 +410,24 @@ STYLES:
 ;--------------------------------------------------------
     PRINT proc
 ; Function for printing text at a calculated address
-; ENTRY  : SI - bias
-;          DX - color of text
+; ENTRY:   DI - bias message
+;          AH - color of text
+;          CX - number of symbols
+;          SI - current place in command line
 ; DESTROY: 
-            mov bx, 0b800h
-            mov es, bx
-            mov bx, offset MESSAGE
-            xor ax, ax
 
-    BELOW_PRINT:
-            mov di, [bx]
-            mov es: [si], di
-            mov es: [si+1], dh
-            inc bx
-            inc ax
-            add si, 2
+           mov bx, 0b800h
+           mov es, bx
 
-    CONDITION_PRINT:
-            cmp ax, cx
-            jb BELOW_PRINT
-            ret
+           mov bx, di
+           mov di, si
+           mov si, bx
+
+        PRINT_MESSAGE_CYCLE:
+           lodsb            ;| <=>  mov es[di], ax   add di, 2
+           stosw
+           loop PRINT_MESSAGE_CYCLE
+           ret
     endp
 ;---------------------------------------------------------
     MY__END proc
