@@ -9,6 +9,14 @@ MESSAGE: db "wqds$"
 SYMBOLS: db 0c9h, 03h, 0bbh, 03h, 0h, 03h, 0c8h, 03h, 0bch
 
 STYLES: 
+        db 0dah, 0c4h, 0bfh
+        db 0b3h, 0h,   0b3h
+        db 0c0h, 0c4h, 0d9h
+
+        db 0c9h, 0cdh, 0bbh
+        db 0bah, 0h,   0bah
+        db 0c8h, 0cdh, 0bch
+
         db 0c9h, 03h,  0bbh
         db 03h,  0h,   03h
         db 0c8h, 03h,  0bch
@@ -65,7 +73,7 @@ STYLES:
 ;          BX - frame height (Y)
 ; DESTROY: AX, BX, CX, DX, SI, DI
 
-            mov si, 082h
+            mov si, 082h   ;| - адрес начала команднонй строки
             call MY_ATOI
             mov cx, bx
 
