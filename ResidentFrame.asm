@@ -10,105 +10,155 @@
     VIDEOMEM_SEGMENT        equ     0b800h      ;| - адрес начала видеопамяти
     WIDTH_FRAME             equ     014d        ;| - ширина рамки
     LENGTH_FRAME            equ     015d        ;| - высота рамки
-    COLOR_FRAME             equ     04eh        ;| - цвет рамки
+    COLOR_FRAME             equ     0f2h        ;| - цвет рамки
     CODE_JUMP               equ     0eah        ;| - команда jmp в hex формате
     ASCII_CARRIAGE_RETURN   equ     0dh         ;| - ASCII-код символа возврата каретки
     WIDTH_DISPLAY           equ     080d        ;| - ширина дисплея (в знакоместах)
     LENGTH_DISPLAY          equ     025d        ;| - высота дисплея (в знакоместах)
     BYTE_WIDTH_DISPLAY      equ     0160d       ;| - ширина дисплея (в байтах)
     BIAS_FRAME              equ     0438d       ;| - смещение относительно начала видеопамяти (в байтах)
+    OFFSET_INT_08h          equ     08h*4h      ;| - смещение в таблице прерываний, по которому  лежит адрес функции-обработчика 8 прерывния
+    OFFSET_INT_09h          equ     09h*4h      ;| - смещение в таблице прерываний, по которому  лежит адрес функции-обработчика 9 прерывния
+    PUSH_KEY_FOR_SHOW_REG   equ     32h         ;| - скан-код нажатия клавиши, который рисует/убирает рамку с регистрами
+    PULL_KEY_FOR_SHOW_REG   equ     0b2h        ;| - скан-код отпускания этой же клавиши 
+    EMPTY_SYMBOL            equ     0h          ;| - чёрный фон для затирания рамки
+
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
- STYLES:
+    STYLES:
         db 0c9h, 0cdh, 0bbh
-        db 0bah, 0h,   0bah     ; Double frame
+        db 0bah, 0h,   0bah     ;| - Double frame
         db 0c8h, 0cdh, 0bch
-
 ;--------------------------------------------------------------------------------------------------------
 ;////////------MACRO-------//////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
     FINISHED_PROCESSING_SYMBOL macro
-        in al, 61h
-        or al, 10000000b
-        out 61h, al
-        xor al, al
-        out 61h, al
+        in   al,  61h           ;\ -  al = 61h
+        mov  ah,  al            ;| -  ah = al (save al)
+        or   al,  80h           ;|
+        out  61h, al            ;|
+        xchg al,  ah            ;|
+        out  61h, al            ;/ - мигнули старшим битом 61h
+
+        mov al, 20h             ;\ - сигнал контроллеру прерываний
+        out 20h, al             ;/
     endm
-;--------------------------------------------------------------------------------------------------------
-;////////////////////////////////////////////////////////////////////////////////////////////////////////
-;--------------------------------------------------------------------------------------------------------
-    START_NEW_INT_09h proc
 
-        nop
-        nop
-        nop
-
+    SAVE_ALL_REGISTERS macro
         push ax
         push bx
         push cx
         push dx
-        push si
-        push di
-        ;push bp
-        ;push sp
-        push ds
+        push si 
+        push di 
         push es
-        ;push ss
-        
+        push ds
+        push bp
+        push sp
+        push ss 
+    endm
 
-        
-        call DRAW_RESIDENT_FRAME
-
-        ;FINISHED_PROCESSING_SYMBOL
-
-        ;mov al, 20h
-        ;out 20h, al
-
-        ;pop ss 
-        pop es 
-        pop ds 
-        ;pop sp 
-        ;pop bp 
-        pop di 
-        pop si 
+    RET_ALL_REGISTERS macro
+        pop ss
+        pop sp
+        pop bp 
+        pop ds
+        pop es
+        pop di
+        pop si
         pop dx
         pop cx
         pop bx
         pop ax
+    endm
+;--------------------------------------------------------------------------------------------------------
+;////////////////////////////////////////////////////////////////////////////////////////////////////////
+;--------------------------------------------------------------------------------------------------------
+    START_MY_HANDLE_KEYBOARD_INT proc
 
-        nop
-        nop
-        nop
+        push ax                                 ;\
+        in al, 60h                              ;| - вызываем функцию считывания символа из буфера клавиатуры и сравниваем полученное значение со скан кодом нужной клавиши
+        cmp al, PULL_KEY_FOR_SHOW_REG           ;|
+        je @@NEXT
+        
+        cmp al, PUSH_KEY_FOR_SHOW_REG           ;|
+        je @@Enable_or_Disable_Frame            ;/
 
-        db CODE_JUMP
+    @@CALL_OLD_HANDLE:                          
+        pop ax                                  ;\ - возвращаем регистр ax в прежнее состояние и переходим к старому обработчику
+        db CODE_JUMP                            ;/
+        ORIGINAL_OFFSET_INT_09h:  dw 0          ;\ - задаёт сегмент и смещение для прыжка 
+        ORIGINAL_SEGMENT_INT_09h: dw 0          ;/
 
- ORIGINAL_OFFSET_INT_09h:  dw 0
- ORIGINAL_SEGMENT_INT_09h: dw 0
+    @@Enable_or_Disable_Frame:
+        mov bl, byte ptr cs:[ACTIVE]            ;\
+        not bl                                  ;| - инвертируем биты в переменной ACTIVE
+        mov byte ptr cs:[ACTIVE], bl            ;/
 
-        iret
+        cmp byte ptr cs:[ACTIVE], 0h 
+        jne @@NEXT
+        push ax
+        call CLEAR_FRAME
+        pop ax
+
+    @@NEXT:
+        FINISHED_PROCESSING_SYMBOL
+        pop ax
+
+        iret                                    ;|
+
+        ACTIVE: db 0h                           ;|
+ endp 
+;--------------------------------------------------------------------------------------------------------
+;////////////////////////////////////////////////////////////////////////////////////////////////////////
+;--------------------------------------------------------------------------------------------------------
+    START_MY_HANDLE_TIMER_INT proc
+
+        SAVE_ALL_REGISTERS
+
+        cmp byte ptr cs:[ACTIVE], 0ffh
+        jne @@CALL_OLD_HANDLE
+
+        call DRAW_RESIDENT_FRAME
+
+    @@CALL_OLD_HANDLE:                          ;\
+        RET_ALL_REGISTERS                       ;| - 
+        db CODE_JUMP                            ;/
+
+        ORIGINAL_OFFSET_INT_08h:  dw 0          ;\
+        ORIGINAL_SEGMENT_INT_08h: dw 0          ;/
+
+        iret                                    ;|
+
  endp 
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
     DRAW_RESIDENT_FRAME proc 
 
-    mov dx, VIDEOMEM_SEGMENT   ;\ <=> es = 0b800h
-    mov es, dx       ;/ 
+    mov dx, VIDEOMEM_SEGMENT    ;\ <=> es = 0b800h
+    mov es, dx                  ;/
 
-    mov ah, COLOR_FRAME                           ;\ - цвет рамки           \   
-    mov cx, 3;WIDTH_FRAME                     ;| - длина рмки           |
-    mov dx, 3;LENGTH_FRAME                    ;| - высота рамки         | -  подготавливаю регистры для рисования рамки
-    mov di, BIAS_FRAME                      ;| - записываю смещение   |
-                                            ;/   для распечатки рамки /
+    mov ax, cs                  ;\
+    push ax                     ;| - кладу в регистр ds содержимое регистра cs, чтобы данные сохранённые в этом сегменте не потерялись 
+    pop ds                      ;/
 
+    mov ax, 1003h               ;\
+    xor bl, bl                  ;| - вызываю прерывание, отключающее моргание дисплея, задающееся в аттрибуте цвета
+    int 10h                     ;/
 
-    sub cx, 2        ;| - подготовка регистра cx как счётчика для DRAW_LINE
-    sub dx, 2        ;| - подготовка регистра dx как счётчика для DRAW_FRAME_CYCLE
-    lea si, STYLES   ;| - родготовка si для ф-ци draw line
+    mov ah, COLOR_FRAME         ;\ - цвет рамки           \   
+    mov cx, WIDTH_FRAME         ;| - длина рмки           |
+    mov dx, LENGTH_FRAME        ;| - высота рамки         | -  подготавливаю регистры для рисования рамки
+    mov di, BIAS_FRAME          ;| - записываю смещение   |
+                                ;/   для распечатки рамки /
+
+    sub cx, 2                   ;| - подготовка регистра cx как счётчика для DRAW_LINE
+    sub dx, 2                   ;| - подготовка регистра dx как счётчика для DRAW_FRAME_CYCLE
+    lea si, STYLES              ;| - подготовка si для ф-ци draw line
 
     call DRAW_FRAMES
-
     ret
  endp
 ;--------------------------------------------------------------------------------------------------------
@@ -163,6 +213,29 @@
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
+    CLEAR_FRAME proc
+
+        mov ax, VIDEOMEM_SEGMENT
+        mov es, ax
+        mov di, BIAS_FRAME
+        mov ax, EMPTY_SYMBOL
+        mov dx, LENGTH_FRAME
+
+    @@CYCLE:
+        mov cx, WIDTH_FRAME
+        push di
+        rep stosw
+        pop di
+        add di, BYTE_WIDTH_DISPLAY
+        dec dx
+        cmp dx, 0h 
+        jne @@CYCLE
+
+        ret
+    endp
+;--------------------------------------------------------------------------------------------------------
+;////////////////////////////////////////////////////////////////////////////////////////////////////////
+;--------------------------------------------------------------------------------------------------------
     MY_STRLEN proc
 
 ; MY_STRLEN counts the number of characters in the string until it reaches the '$' character
@@ -170,7 +243,7 @@
 ; EXIT:  CX - result
 ; DESTR: AL, DI, CX
 
-            mov al, 0dh     ;| ASCII код возврата каретки
+            mov al, ASCII_CARRIAGE_RETURN
             mov bx, ds
             mov es, bx
             xor cx, cx
@@ -187,38 +260,43 @@
 ;--------------------------------------------------------------------------------------------------------
     ;sinclude fndrfram.asm
 
-    END_NEW_INT_09h:
+    END_MY_HANDLS:
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
     MAIN_RESIDENT_FRAME:
 
-        xor ax, ax
-        mov es, ax
-        mov bx, 08h*4
+        xor ax, ax                                          ;\
+        mov es, ax                                          ;| - 
+        mov bx, OFFSET_INT_08h                              ;|
+        mov di, OFFSET_INT_09h                              ;/
 
-        mov ax, es:[bx]
-        mov word ptr ORIGINAL_OFFSET_INT_09h, ax
-        mov ax, es:[bx + 2]
-        mov word ptr ORIGINAL_SEGMENT_INT_09h, ax
+        mov ax, es:[bx]                                     ;\
+        mov word ptr ORIGINAL_OFFSET_INT_08h, ax            ;| - 
+        mov ax, es:[bx + 2]                                 ;|
+        mov word ptr ORIGINAL_SEGMENT_INT_08h, ax           ;/
 
-        ;int 09h
+        mov dx, es:[di]                                     ;\
+        mov word ptr ORIGINAL_OFFSET_INT_09h, dx            ;| - 
+        mov dx, es:[di + 2]                                 ;|
+        mov word ptr ORIGINAL_SEGMENT_INT_09h, dx           ;/
 
-        cli
-        mov es:[bx], offset START_NEW_INT_09h
-        push cs
-        pop ax
-        mov es:[bx + 2], ax
-        sti
+        cli                                                 ;\
+        push cs                                             ;|
+        pop ax                                              ;| -
+        mov es:[di], offset START_MY_HANDLE_KEYBOARD_INT    ;| 
+        mov es:[di + 2], ax                                 ;/
+        
+        mov es:[bx], offset START_MY_HANDLE_TIMER_INT       ;\
+        mov es:[bx + 2], ax                                 ;|
+        sti                                                 ;/
 
-        ;call DRAW_RESIDENT_FRAME
-        int 08h
+        mov ah, 31h                                         ;\
+        mov dx, offset END_MY_HANDLS                        ;|
+        shr dx, 4                                           ;| - 
+        inc dx                                              ;|
+        int 21h                                             ;/
 
-        mov ah, 31h
-        mov dx, offset END_NEW_INT_09h
-        shr dx, 4
-        inc dx
-        int 21h
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
