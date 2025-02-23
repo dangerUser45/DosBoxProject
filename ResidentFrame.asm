@@ -57,14 +57,10 @@
         push di 
         push es
         push ds
-        push bp
-        push sp
-        push ss 
+        push bp 
     endm
 ;--------------------------------------------------------------------------------------------------------
     RET_ALL_REGISTERS macro
-        pop ss
-        pop sp
         pop bp 
         pop ds
         pop es
@@ -86,17 +82,51 @@
         pop es
         lea di, BUFFER__DISPLAY_SYMBOLS
 
-        mov cx, WIDTH_FRAME*LENGTH_FRAME
-        rep movsw
+        mov dx, LENGTH_FRAME
+        mov cx, WIDTH_FRAME
 
-        ret
+     @@CYCLE_SAVE_DISPLAY:
+        push si
+        push cx
+        rep movsw
+        pop cx
+        pop si
+        add si, BYTE_WIDTH_DISPLAY
+        dec dx
+        cmp dx, 0h 
+        jne @@CYCLE_SAVE_DISPLAY
+    endm
+;--------------------------------------------------------------------------------------------------------
+     FILL_VIDEO_MEMORY macro
+
+        mov ax, VIDEOMEM_SEGMENT
+        mov es, ax
+        mov di, BIAS_FRAME
+
+        push cs
+        pop ds
+        lea si, BUFFER__DISPLAY_SYMBOLS
+
+        mov dx, LENGTH_FRAME
+        mov cx, WIDTH_FRAME
+
+     @@CYCLE_FILL_VIDEOMEMORY:
+        push di
+        push cx
+        rep movsw
+        pop cx
+        pop di
+        add di, BYTE_WIDTH_DISPLAY
+        dec dx
+        cmp dx, 0h 
+        jne @@CYCLE_FILL_VIDEOMEMORY
     endm
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
     START_MY_HANDLE_KEYBOARD_INT proc
 
-        push ax                                 ;\
+        SAVE_ALL_REGISTERS                      ;\
         in al, 60h                              ;| - вызываем функцию считывания символа из буфера клавиатуры и сравниваем полученное значение со скан кодом нужной клавиши
         cmp al, PULL_KEY_FOR_SHOW_REG           ;|
         je @@NEXT
@@ -104,11 +134,20 @@
         cmp al, PUSH_KEY_FOR_SHOW_REG           ;|
         je @@Enable_or_Disable_Frame            ;/
 
+        ;cmp al, PUSH_KEY_ENTER
+        ;je @@CASE_ENTER
+
     @@CALL_OLD_HANDLE:                          
-        pop ax                                  ;\ - возвращаем регистр ax в прежнее состояние и переходим к старому обработчику
+        RET_ALL_REGISTERS                      ;\ - возвращаем регистр ax в прежнее состояние и переходим к старому обработчику
+        
         db CODE_JUMP                            ;/
         ORIGINAL_OFFSET_INT_09h:  dw 0          ;\ - задаёт сегмент и смещение для прыжка 
         ORIGINAL_SEGMENT_INT_09h: dw 0          ;/
+        ;jmp @@EXIT
+
+    ;@@CASE_ENTER
+          ;SAVE_DISPLAY
+          ;jmp @@CALL_OLD_HANDLE
 
     @@Enable_or_Disable_Frame:
         mov bl, byte ptr cs:[ACTIVE]            ;\
@@ -118,30 +157,35 @@
         cmp byte ptr cs:[ACTIVE], 0h 
         jne @@NEXT
 
-        call FILL_VIDEO_MEMORY
+        FILL_VIDEO_MEMORY
 
     @@NEXT:
         FINISHED_PROCESSING_SYMBOL
-        pop ax
-
+        RET_ALL_REGISTERS
+    
+    @@EXIT:
         iret                                    ;|
 
         ACTIVE: db 0h                           ;|
  endp 
-;--------------------------------------------------------------------------------------------------------
+;--------------------------------------------------------------------------------------------------------xx 
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
     START_MY_HANDLE_TIMER_INT proc
 
         SAVE_ALL_REGISTERS
-        SAVE_DISPLAY
 
         cmp byte ptr cs:[ACTIVE], 0ffh
-        jne @@CALL_OLD_HANDLE
+        jne  @@CLEAR_FRAME
 
         call DRAW_RESIDENT_FRAME
+        jmp @@CALL_OLD_HANDLE
 
-    @@CALL_OLD_HANDLE:                          ;\
+    @@CLEAR_FRAME:
+        SAVE_DISPLAY                            ;| - сохраняю ту часть экрана, которая будет затёрта рамкой
+        FILL_VIDEO_MEMORY
+
+    @@CALL_OLD_HANDLE:                          ;\                 
         RET_ALL_REGISTERS                       ;| - 
         db CODE_JUMP                            ;/
 
@@ -232,36 +276,6 @@
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
-     FILL_VIDEO_MEMORY proc
-
-        
-    endp
-;--------------------------------------------------------------------------------------------------------
-;////////////////////////////////////////////////////////////////////////////////////////////////////////
-;--------------------------------------------------------------------------------------------------------
-    CLEAR_FRAME proc
-
-        mov ax, VIDEOMEM_SEGMENT
-        mov es, ax
-        mov di, BIAS_FRAME
-        mov ax, EMPTY_SYMBOL
-        mov dx, LENGTH_FRAME
-
-    @@CYCLE:
-        mov cx, WIDTH_FRAME
-        push di
-        rep stosw
-        pop di
-        add di, BYTE_WIDTH_DISPLAY
-        dec dx
-        cmp dx, 0h 
-        jne @@CYCLE
-
-        ret
-    endp
-;--------------------------------------------------------------------------------------------------------
-;////////////////////////////////////////////////////////////////////////////////////////////////////////
-;--------------------------------------------------------------------------------------------------------
     ;sinclude fndrfram.asm
 
     END_MY_HANDLS:
@@ -269,7 +283,6 @@
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
     MAIN_RESIDENT_FRAME:
-
         xor ax, ax                                          ;\
         mov es, ax                                          ;| - 
         mov bx, OFFSET_INT_08h                              ;|
@@ -295,6 +308,11 @@
         mov es:[bx + 2], ax                                 ;|
         sti                                                 ;/
 
+        ;int 09h                         ; - TEST!!!
+        ;int 08h                         ; - TEST!!!
+        ;cli                             ; - TEST!!!
+        ;call DRAW_RESIDENT_FRAME        ; - TEST!!!
+        ;sti                             ; - TEST!!!
         mov ah, 31h                                         ;\
         mov dx, offset END_MY_HANDLS                        ;|
         shr dx, 4                                           ;| - 
