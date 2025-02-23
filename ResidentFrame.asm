@@ -16,12 +16,15 @@
     WIDTH_DISPLAY           equ     080d        ;| - ширина дисплея (в знакоместах)
     LENGTH_DISPLAY          equ     025d        ;| - высота дисплея (в знакоместах)
     BYTE_WIDTH_DISPLAY      equ     0160d       ;| - ширина дисплея (в байтах)
-    BIAS_FRAME              equ     0438d       ;| - смещение относительно начала видеопамяти (в байтах)
     OFFSET_INT_08h          equ     08h*4h      ;| - смещение в таблице прерываний, по которому  лежит адрес функции-обработчика 8 прерывния
     OFFSET_INT_09h          equ     09h*4h      ;| - смещение в таблице прерываний, по которому  лежит адрес функции-обработчика 9 прерывния
     PUSH_KEY_FOR_SHOW_REG   equ     32h         ;| - скан-код нажатия клавиши, который рисует/убирает рамку с регистрами
     PULL_KEY_FOR_SHOW_REG   equ     0b2h        ;| - скан-код отпускания этой же клавиши 
-    EMPTY_SYMBOL            equ     0h          ;| - чёрный фон для затирания рамки
+    QUANTITY_REG            equ     12d         ;| - количество показываемых регистров
+    BYTE_WORD               equ     2d          ;| - количество байт в одном слове
+
+    BIAS_FRAME_LABEL:
+    BIAS_FRAME              equ     0438d       ;| - смещение относительно начала видеопамяти (в байтах)
 
 ;--------------------------------------------------------------------------------------------------------
 ;//////////------DATA-------////////////////////////////////////////////////////////////////////////
@@ -30,9 +33,20 @@
         db 0c9h, 0cdh, 0bbh
         db 0bah, 0h,   0bah                     ;| - Double frame
         db 0c8h, 0cdh, 0bch
+    
+    NAME_REGISTERS:
+            db 041h, 058h, 042h, 058h           ;| - ax, bx
+            db 043h, 058h, 044h, 058h           ;| - cx, dx
+            db 053h, 049h, 044h, 049h           ;| - si, di
+            db 042h, 050h, 053h, 050h           ;| - bp, sp
+            db 044h, 053h, 045h, 053h           ;| - ds, es
+            db 053h, 053h, 043h, 053h           ;| - ss, cs
 
-    BUFFER__DISPLAY_SYMBOLS:
-        dw WIDTH_FRAME*LENGTH_FRAME dup(0h)     ;| -инициализирую массив для загрузки туда символов которые находились до рисования рамки
+    BUFFER__DISPLAY_SYMBOLS:                    ;\ - инициализирую массив для загрузки туда символов
+        dw WIDTH_FRAME*LENGTH_FRAME dup(0h)     ;/   которые находились до рисования рамки
+    
+    REGISTERS_BUFFER:                       
+        dw QUANTITY_REG dup(0h)                 ;| - инициализирую массив для загрузки туда значений регистров
 ;--------------------------------------------------------------------------------------------------------
 ;////////------MACRO-------//////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
@@ -122,6 +136,22 @@
         jne @@CYCLE_FILL_VIDEOMEMORY
     endm
 ;--------------------------------------------------------------------------------------------------------
+    LOAD_REGISTERS_BUFFER macro
+
+        mov word ptr cs:[REGISTERS_BUFFER +  0d*BYTE_WORD], ax
+        mov word ptr cs:[REGISTERS_BUFFER +  1d*BYTE_WORD], bx
+        mov word ptr cs:[REGISTERS_BUFFER +  2d*BYTE_WORD], cx
+        mov word ptr cs:[REGISTERS_BUFFER +  3d*BYTE_WORD], dx
+        mov word ptr cs:[REGISTERS_BUFFER +  4d*BYTE_WORD], si
+        mov word ptr cs:[REGISTERS_BUFFER +  5d*BYTE_WORD], di
+        mov word ptr cs:[REGISTERS_BUFFER +  6d*BYTE_WORD], bp
+        mov word ptr cs:[REGISTERS_BUFFER +  7d*BYTE_WORD], sp
+        mov word ptr cs:[REGISTERS_BUFFER +  8d*BYTE_WORD], ds
+        mov word ptr cs:[REGISTERS_BUFFER +  9d*BYTE_WORD], es
+        mov word ptr cs:[REGISTERS_BUFFER + 10d*BYTE_WORD], ss
+        mov word ptr cs:[REGISTERS_BUFFER + 11d*BYTE_WORD], cs
+    endm   
+;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
     START_MY_HANDLE_KEYBOARD_INT proc
@@ -134,20 +164,12 @@
         cmp al, PUSH_KEY_FOR_SHOW_REG           ;|
         je @@Enable_or_Disable_Frame            ;/
 
-        ;cmp al, PUSH_KEY_ENTER
-        ;je @@CASE_ENTER
-
     @@CALL_OLD_HANDLE:                          
-        RET_ALL_REGISTERS                      ;\ - возвращаем регистр ax в прежнее состояние и переходим к старому обработчику
+        RET_ALL_REGISTERS                      ;| - возвращаем регистр ax в прежнее состояние и переходим к старому обработчику
         
-        db CODE_JUMP                            ;/
-        ORIGINAL_OFFSET_INT_09h:  dw 0          ;\ - задаёт сегмент и смещение для прыжка 
+        db CODE_JUMP                            ;\
+        ORIGINAL_OFFSET_INT_09h:  dw 0          ;| - задаёт сегмент и смещение для прыжка 
         ORIGINAL_SEGMENT_INT_09h: dw 0          ;/
-        ;jmp @@EXIT
-
-    ;@@CASE_ENTER
-          ;SAVE_DISPLAY
-          ;jmp @@CALL_OLD_HANDLE
 
     @@Enable_or_Disable_Frame:
         mov bl, byte ptr cs:[ACTIVE]            ;\
@@ -178,6 +200,7 @@
         cmp byte ptr cs:[ACTIVE], 0ffh
         jne  @@CLEAR_FRAME
 
+        LOAD_REGISTERS_BUFFER
         call DRAW_RESIDENT_FRAME
         jmp @@CALL_OLD_HANDLE
 
@@ -222,6 +245,7 @@
     lea si, STYLES              ;| - подготовка si для ф-ци draw line
 
     call DRAW_FRAMES
+    call PRINT_REGISTERS
     ret
  endp
 ;--------------------------------------------------------------------------------------------------------
@@ -276,6 +300,91 @@
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
+   PRINT_REGISTERS proc
+
+        push cs
+        pop ds
+        lea si, REGISTERS_BUFFER
+
+        mov di, VIDEOMEM_SEGMENT 
+        mov es, di
+        mov di, BIAS_FRAME + BYTE_WIDTH_DISPLAY + 12d
+        mov cx, QUANTITY_REG
+
+    @@CYCLE_VALUES_REGISTERS:
+        push cx
+        push di
+        call PRINT_ONE_REGISTER
+        pop di
+        add di, BYTE_WIDTH_DISPLAY
+        pop cx
+        loop @@CYCLE_VALUES_REGISTERS
+
+        mov cx, QUANTITY_REG 
+        mov di, BIAS_FRAME + BYTE_WIDTH_DISPLAY + 6d
+        lea si, NAME_REGISTERS
+    @@CYCLE_NAME_REGISTERS:
+        push di
+        movsb
+
+        add di, 1
+        movsb
+        pop di
+        add di, BYTE_WIDTH_DISPLAY
+        loop @@CYCLE_NAME_REGISTERS
+
+        ret
+    endp
+;--------------------------------------------------------------------------------------------------------
+;////////////////////////////////////////////////////////////////////////////////////////////////////////
+;--------------------------------------------------------------------------------------------------------
+    PRINT_ONE_REGISTER proc
+
+        lodsw
+        mov bx, 0f000h
+        mov cl, 3d * 4d
+        mov dx, 4d
+
+    @@CYCLE_ITOA:
+        push ax
+        and ax, bx                      ;| - обнуляю все разряды кроме первого
+        shr ax, cl                      ;| - 
+
+    @@COMPARE_DIGIT:
+        cmp al, 0h
+        jb @@ERROR
+
+        cmp al, 09h
+        ja @@COMPARE_ALPHA
+        add al, '0'
+        jmp @@NEXT
+
+    @@COMPARE_ALPHA:
+        cmp al, 0ah
+        jb @@ERROR
+
+        cmp al, 0fh
+        ja @@ERROR
+        add al, 'A' - 10d
+
+    @@NEXT:
+        mov ah, COLOR_FRAME
+        stosw
+        pop ax
+        shr bx, 4
+        sub cl, 4
+        dec dx
+        cmp dx, 0h
+        jnz @@CYCLE_ITOA
+        ret
+
+        @@ERROR:
+            mov ah, 4ch
+            int 21h
+    endp
+;--------------------------------------------------------------------------------------------------------
+;////////////////////////////////////////////////////////////////////////////////////////////////////////
+;--------------------------------------------------------------------------------------------------------
     ;sinclude fndrfram.asm
 
     END_MY_HANDLS:
@@ -308,11 +417,6 @@
         mov es:[bx + 2], ax                                 ;|
         sti                                                 ;/
 
-        ;int 09h                         ; - TEST!!!
-        ;int 08h                         ; - TEST!!!
-        ;cli                             ; - TEST!!!
-        ;call DRAW_RESIDENT_FRAME        ; - TEST!!!
-        ;sti                             ; - TEST!!!
         mov ah, 31h                                         ;\
         mov dx, offset END_MY_HANDLS                        ;|
         shr dx, 4                                           ;| - 
