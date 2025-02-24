@@ -138,6 +138,33 @@
         jne @@CYCLE_FILL_VIDEOMEMORY
     endm
 ;--------------------------------------------------------------------------------------------------------
+ FILL_VIDEO_MEMORY_2 macro
+
+        mov ax, VIDEOMEM_SEGMENT
+        mov es, ax
+        mov di, BIAS_FRAME
+
+        push cs
+        pop ds
+        lea si, BUFFER__DISPLAY_SYMBOLS
+
+        mov dx, LENGTH_FRAME
+        mov cx, WIDTH_FRAME
+
+     @@CYCLE_FILL_VIDEOMEMORY_2:
+        push di
+        push cx
+        rep movsw
+        pop cx
+        pop di
+        add di, BYTE_WIDTH_DISPLAY
+        dec dx
+        cmp dx, 0h 
+        jne @@CYCLE_FILL_VIDEOMEMORY_2
+    endm
+;--------------------------------------------------------------------------------------------------------
+
+
     LOAD_REGISTERS_BUFFER macro
 
         mov word ptr cs:[REGISTERS_BUFFER +  0d*BYTE_WORD], ax
@@ -166,14 +193,14 @@
 
         in al, 60h                              ;| - вызываем функцию считывания символа из буфера клавиатуры и сравниваем полученное значение со скан кодом нужной клавиши
         
+        cmp al, PULL_KEY_SHOW_REG_PRESS
+        je @@DISABLE_FRAME
+        
         cmp bl, 00000100b                       ;| - проверяем не нажат ли "ctrl"
         jne @@CALL_OLD_HANDLE
 
         cmp al, PUSH_KEY_SHOW_REG_PRESS
         je @@ENABLE_FRAME
-
-        cmp al, PULL_KEY_SHOW_REG_PRESS
-        je @@DISABLE_FRAME
         
         cmp al, PUSH_KEY_SHOW_REG_ONCE          ;\
         je @@ENABLE_OR_DISABLE_FRAME            ;/
@@ -205,7 +232,7 @@
         cmp byte ptr cs:[ACTIVE], 0h 
         jne @@NEXT
 
-        FILL_VIDEO_MEMORY
+        FILL_VIDEO_MEMORY_2
 
     @@NEXT:
         FINISHED_PROCESSING_SYMBOL
