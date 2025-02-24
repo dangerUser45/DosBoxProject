@@ -1,4 +1,4 @@
- .model tiny
+.model tiny
  .code
   locals @@
   org 100h
@@ -18,8 +18,10 @@
     BYTE_WIDTH_DISPLAY      equ     0160d       ;| - ширина дисплея (в байтах)
     OFFSET_INT_08h          equ     08h*4h      ;| - смещение в таблице прерываний, по которому  лежит адрес функции-обработчика 8 прерывния
     OFFSET_INT_09h          equ     09h*4h      ;| - смещение в таблице прерываний, по которому  лежит адрес функции-обработчика 9 прерывния
-    PUSH_KEY_FOR_SHOW_REG   equ     32h         ;| - скан-код нажатия клавиши, который рисует/убирает рамку с регистрами
-    PULL_KEY_FOR_SHOW_REG   equ     0b2h        ;| - скан-код отпускания этой же клавиши 
+    PUSH_KEY_SHOW_REG_ONCE  equ     29h         ;| - скан-код нажатия клавиши, который рисует/убирает рамку с регистрами
+    PULL_KEY_SHOW_REG_ONCE  equ     0a9h        ;| - скан-код отпускания этой же клавиши
+    PUSH_KEY_SHOW_REG_PRESS equ     0fh         ;| - скан-код клавиши, которая рисует рамку до тех пор, пока она нажата 
+    PULL_KEY_SHOW_REG_PRESS equ     08fh        ;| - скан-код отпускания клавиши клавиши выше 
     QUANTITY_REG            equ     12d         ;| - количество показываемых регистров
     BYTE_WORD               equ     2d          ;| - количество байт в одном слове
 
@@ -154,15 +156,30 @@
 ;--------------------------------------------------------------------------------------------------------
 ;////////////////////////////////////////////////////////////////////////////////////////////////////////
 ;--------------------------------------------------------------------------------------------------------
-    START_MY_HANDLE_KEYBOARD_INT proc
+   START_MY_HANDLE_KEYBOARD_INT proc
 
         SAVE_ALL_REGISTERS                      ;\
-        in al, 60h                              ;| - вызываем функцию считывания символа из буфера клавиатуры и сравниваем полученное значение со скан кодом нужной клавиши
-        cmp al, PULL_KEY_FOR_SHOW_REG           ;|
-        je @@NEXT
         
-        cmp al, PUSH_KEY_FOR_SHOW_REG           ;|
-        je @@Enable_or_Disable_Frame            ;/
+        mov ah, 02h                             ;\
+        int 16h                                 ;| - вызываем 2-ую ф-цию 16-го прервания, чтобы проверить специальные клавиши
+        mov bl, al                              ;/
+
+        in al, 60h                              ;| - вызываем функцию считывания символа из буфера клавиатуры и сравниваем полученное значение со скан кодом нужной клавиши
+        
+        cmp bl, 00000100b                       ;| - проверяем не нажат ли "ctrl"
+        jne @@CALL_OLD_HANDLE
+
+        cmp al, PUSH_KEY_SHOW_REG_PRESS
+        je @@ENABLE_FRAME
+
+        cmp al, PULL_KEY_SHOW_REG_PRESS
+        je @@DISABLE_FRAME
+        
+        cmp al, PUSH_KEY_SHOW_REG_ONCE          ;\
+        je @@ENABLE_OR_DISABLE_FRAME            ;/
+        
+        cmp al, PULL_KEY_SHOW_REG_ONCE          ;|
+        je @@NEXT
 
     @@CALL_OLD_HANDLE:                          
         RET_ALL_REGISTERS                      ;| - возвращаем регистр ax в прежнее состояние и переходим к старому обработчику
@@ -171,7 +188,16 @@
         ORIGINAL_OFFSET_INT_09h:  dw 0          ;| - задаёт сегмент и смещение для прыжка 
         ORIGINAL_SEGMENT_INT_09h: dw 0          ;/
 
-    @@Enable_or_Disable_Frame:
+    @@ENABLE_FRAME:
+        mov byte ptr cs:[ACTIVE], 0ffh
+        jmp @@NEXT
+    
+    @@DISABLE_FRAME:
+        mov byte ptr cs:[ACTIVE], 0h
+        FILL_VIDEO_MEMORY
+        jmp @@NEXT
+
+    @@ENABLE_OR_DISABLE_FRAME:
         mov bl, byte ptr cs:[ACTIVE]            ;\
         not bl                                  ;| - инвертируем биты в переменной ACTIVE
         mov byte ptr cs:[ACTIVE], bl            ;/
@@ -206,7 +232,7 @@
 
     @@CLEAR_FRAME:
         SAVE_DISPLAY                            ;| - сохраняю ту часть экрана, которая будет затёрта рамкой
-        FILL_VIDEO_MEMORY
+        ;FILL_VIDEO_MEMORY
 
     @@CALL_OLD_HANDLE:                          ;\                 
         RET_ALL_REGISTERS                       ;| - 
